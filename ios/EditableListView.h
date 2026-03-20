@@ -6,7 +6,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface EditableListView : RCTViewComponentView
+@interface EditableListView : RCTViewComponentView <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
 @end
 
 NS_ASSUME_NONNULL_END

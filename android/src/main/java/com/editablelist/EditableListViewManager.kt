@@ -35,6 +35,16 @@ class EditableListViewManager : SimpleViewManager<EditableListView>(),
     view?.setBackgroundColor(color ?: Color.TRANSPARENT)
   }
 
+  @ReactProp(name = "searchEnabled")
+  override fun setSearchEnabled(view: EditableListView?, value: Boolean) {
+    // Native search UI is currently implemented on iOS only.
+  }
+
+  @ReactProp(name = "searchPlaceholder")
+  override fun setSearchPlaceholder(view: EditableListView?, value: String?) {
+    // Native search UI is currently implemented on iOS only.
+  }
+
   companion object {
     const val NAME = "EditableListView"
   }

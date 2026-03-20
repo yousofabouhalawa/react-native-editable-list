@@ -18,7 +18,11 @@ import { EditableListView } from "react-native-editable-list";
 
 // ...
 
-<EditableListView color="tomato" />
+<EditableListView
+  data={[{ id: "1", title: "Row 1" }]}
+  keyExtractor={(item) => item.id}
+  renderItem={({ item }) => <Text>{item.title}</Text>}
+/>
 ```
 
 
