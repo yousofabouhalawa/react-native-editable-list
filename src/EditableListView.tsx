@@ -1,5 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  InteractionManager,
+  StyleSheet,
+  type GestureResponderEvent,
+  View,
+} from 'react-native';
 
 import NativeEditableListView from './EditableListViewNativeComponent';
 
@@ -7,6 +18,19 @@ type NativePassthroughProps = Omit<
   React.ComponentProps<typeof NativeEditableListView>,
   'itemCount' | 'itemHeights' | 'rowItemIndices'
 >;
+
+type SwipeActionEvent = Parameters<
+  NonNullable<
+    React.ComponentProps<typeof NativeEditableListView>['onSwipeAction']
+  >
+>[0];
+
+export type EditableListVirtualizationConfig = {
+  enabled?: boolean;
+  initialNumToRender?: number;
+  maxToRenderPerBatch?: number;
+  updateCellsBatchingPeriod?: number;
+};
 
 type EditableListViewProps<ItemT> = {
   data?: ItemT[];
@@ -48,6 +72,7 @@ type EditableListViewProps<ItemT> = {
     typeof NativeEditableListView
   >['onSwipeAction'];
   extraData?: unknown;
+  virtualization?: EditableListVirtualizationConfig;
 } & NativePassthroughProps;
 
 const noopSeparators = {
@@ -75,10 +100,43 @@ function EditableListView<ItemT>(props: EditableListViewProps<ItemT>) {
     ListFooterComponent,
     ItemSeparatorComponent,
     extraData,
+    virtualization,
+    swipeActions,
+    onSwipeAction,
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd,
+    onTouchCancel,
     ...rest
   } = props;
 
   const [itemHeights, setItemHeights] = useState<number[]>([]);
+  const batchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batchInteractionTaskRef = useRef<{ cancel: () => void } | null>(null);
+  const interactionReleaseTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
+  const touchMaxDeltaRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const [renderedItemCount, setRenderedItemCount] = useState<number>(0);
+  const [isInteracting, setIsInteracting] = useState(false);
+
+  const virtualizationEnabled = virtualization?.enabled === true;
+  const initialNumToRender = Math.max(
+    1,
+    virtualization?.initialNumToRender ?? 24
+  );
+  const maxToRenderPerBatch = Math.max(
+    1,
+    virtualization?.maxToRenderPerBatch ?? 24
+  );
+  const updateCellsBatchingPeriod = Math.max(
+    16,
+    virtualization?.updateCellsBatchingPeriod ?? 48
+  );
+  const hasSwipeActions =
+    (swipeActions?.leading?.length ?? 0) > 0 ||
+    (swipeActions?.trailing?.length ?? 0) > 0;
   const updateItemHeight = useCallback((index: number, height: number) => {
     if (height <= 0) {
       return;
@@ -110,10 +168,188 @@ function EditableListView<ItemT>(props: EditableListViewProps<ItemT>) {
     extraData,
   ]);
 
+  const totalCount = data?.length ?? 0;
+
+  const clearInteractionReleaseTimeout = useCallback(() => {
+    if (interactionReleaseTimeoutRef.current) {
+      clearTimeout(interactionReleaseTimeoutRef.current);
+      interactionReleaseTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleInteractionRelease = useCallback(
+    (delayMs: number) => {
+      clearInteractionReleaseTimeout();
+      interactionReleaseTimeoutRef.current = setTimeout(() => {
+        setIsInteracting(false);
+        interactionReleaseTimeoutRef.current = null;
+      }, delayMs);
+    },
+    [clearInteractionReleaseTimeout]
+  );
+
+  const handleTouchStart = useCallback(
+    (event: GestureResponderEvent) => {
+      clearInteractionReleaseTimeout();
+      setIsInteracting(true);
+      touchStartPointRef.current = {
+        x: event.nativeEvent.pageX,
+        y: event.nativeEvent.pageY,
+      };
+      touchMaxDeltaRef.current = { dx: 0, dy: 0 };
+      onTouchStart?.(event);
+    },
+    [clearInteractionReleaseTimeout, onTouchStart]
+  );
+
+  const handleTouchMove = useCallback(
+    (event: GestureResponderEvent) => {
+      const start = touchStartPointRef.current;
+      if (start) {
+        const dx = Math.abs(event.nativeEvent.pageX - start.x);
+        const dy = Math.abs(event.nativeEvent.pageY - start.y);
+        touchMaxDeltaRef.current = {
+          dx: Math.max(touchMaxDeltaRef.current.dx, dx),
+          dy: Math.max(touchMaxDeltaRef.current.dy, dy),
+        };
+      }
+      onTouchMove?.(event);
+    },
+    [onTouchMove]
+  );
+
+  const handleTouchEndLike = useCallback(
+    (
+      event: GestureResponderEvent,
+      originalHandler?: (event: GestureResponderEvent) => void
+    ) => {
+      originalHandler?.(event);
+      const { dx, dy } = touchMaxDeltaRef.current;
+      const isHorizontalSwipe = dx > 10 && dx > dy * 1.2;
+      const releaseDelay = isHorizontalSwipe && hasSwipeActions ? 12000 : 220;
+      scheduleInteractionRelease(releaseDelay);
+      touchStartPointRef.current = null;
+      touchMaxDeltaRef.current = { dx: 0, dy: 0 };
+    },
+    [hasSwipeActions, scheduleInteractionRelease]
+  );
+
+  const handleTouchEnd = useCallback(
+    (event: GestureResponderEvent) => {
+      handleTouchEndLike(event, onTouchEnd);
+    },
+    [handleTouchEndLike, onTouchEnd]
+  );
+
+  const handleTouchCancel = useCallback(
+    (event: GestureResponderEvent) => {
+      handleTouchEndLike(event, onTouchCancel);
+    },
+    [handleTouchEndLike, onTouchCancel]
+  );
+
+  const handleSwipeAction = useCallback(
+    (event: SwipeActionEvent) => {
+      onSwipeAction?.(event);
+      const actionKey = event.nativeEvent.actionKey?.toLowerCase() ?? '';
+      const isDeleteAction = actionKey.includes('delete');
+      scheduleInteractionRelease(isDeleteAction ? 900 : 80);
+    },
+    [onSwipeAction, scheduleInteractionRelease]
+  );
+
+  useEffect(() => {
+    setRenderedItemCount((prev) => {
+      if (!virtualizationEnabled) {
+        return totalCount;
+      }
+      if (totalCount === 0) {
+        return 0;
+      }
+      if (prev === 0) {
+        return Math.min(initialNumToRender, totalCount);
+      }
+      return Math.min(prev, totalCount);
+    });
+  }, [totalCount, virtualizationEnabled, initialNumToRender, extraData]);
+
+  useEffect(() => {
+    if (batchTimeoutRef.current) {
+      clearTimeout(batchTimeoutRef.current);
+      batchTimeoutRef.current = null;
+    }
+    if (batchInteractionTaskRef.current) {
+      batchInteractionTaskRef.current.cancel();
+      batchInteractionTaskRef.current = null;
+    }
+
+    if (!virtualizationEnabled) {
+      return;
+    }
+
+    if (renderedItemCount >= totalCount) {
+      return;
+    }
+
+    if (isInteracting) {
+      return;
+    }
+
+    batchInteractionTaskRef.current = InteractionManager.runAfterInteractions(
+      () => {
+        batchTimeoutRef.current = setTimeout(() => {
+          setRenderedItemCount((prev) =>
+            Math.min(prev + maxToRenderPerBatch, totalCount)
+          );
+          batchTimeoutRef.current = null;
+        }, updateCellsBatchingPeriod);
+      }
+    );
+
+    return () => {
+      if (batchTimeoutRef.current) {
+        clearTimeout(batchTimeoutRef.current);
+        batchTimeoutRef.current = null;
+      }
+      if (batchInteractionTaskRef.current) {
+        batchInteractionTaskRef.current.cancel();
+        batchInteractionTaskRef.current = null;
+      }
+    };
+  }, [
+    renderedItemCount,
+    totalCount,
+    virtualizationEnabled,
+    isInteracting,
+    maxToRenderPerBatch,
+    updateCellsBatchingPeriod,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (batchTimeoutRef.current) {
+        clearTimeout(batchTimeoutRef.current);
+        batchTimeoutRef.current = null;
+      }
+      if (batchInteractionTaskRef.current) {
+        batchInteractionTaskRef.current.cancel();
+        batchInteractionTaskRef.current = null;
+      }
+      if (interactionReleaseTimeoutRef.current) {
+        clearTimeout(interactionReleaseTimeoutRef.current);
+        interactionReleaseTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const { children, rowCount, rowItemIndices } = useMemo(() => {
-    if (!data) {
+    if (!data || data.length === 0) {
       return { children: null, rowCount: 0, rowItemIndices: [] as number[] };
     }
+
+    const rowsData = virtualizationEnabled
+      ? data.slice(0, Math.min(renderedItemCount, data.length))
+      : data;
 
     const resolvedRenderItem =
       renderItem ??
@@ -143,7 +379,7 @@ function EditableListView<ItemT>(props: EditableListViewProps<ItemT>) {
       );
     }
 
-    data.forEach((item, index) => {
+    rowsData.forEach((item, index) => {
       const element = resolvedRenderItem({
         item,
         index,
@@ -173,7 +409,7 @@ function EditableListView<ItemT>(props: EditableListViewProps<ItemT>) {
         );
       }
 
-      if (ItemSeparatorComponent && index < data.length - 1) {
+      if (ItemSeparatorComponent && index < rowsData.length - 1) {
         const separator =
           typeof ItemSeparatorComponent === 'function'
             ? ItemSeparatorComponent({ highlighted: false })
@@ -233,15 +469,23 @@ function EditableListView<ItemT>(props: EditableListViewProps<ItemT>) {
     ListFooterComponent,
     ItemSeparatorComponent,
     extraData,
+    virtualizationEnabled,
+    renderedItemCount,
     updateItemHeight,
   ]);
 
   return (
     <NativeEditableListView
       {...rest}
+      swipeActions={swipeActions}
       itemHeights={itemHeights}
       itemCount={rowCount}
       rowItemIndices={rowItemIndices}
+      onSwipeAction={handleSwipeAction}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
     >
       {children}
     </NativeEditableListView>

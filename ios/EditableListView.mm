@@ -160,6 +160,7 @@ static NSArray<EditableListSwipeAction *> *EditableListSwipeActionArrayFromVecto
     _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     _tableView.estimatedRowHeight = 72.0;
     _tableView.rowHeight = UITableViewAutomaticDimension;
+    _tableView.backgroundColor = UIColor.systemBackgroundColor;
     [_tableView registerClass:[UITableViewCell class]
        forCellReuseIdentifier:@"EditableListCell"];
     _searchEnabled = NO;
@@ -297,6 +298,12 @@ static NSArray<EditableListSwipeAction *> *EditableListSwipeActionArrayFromVecto
     return NO;
   }
 
+  UIView *deletingView = _itemViews[(NSUInteger)row];
+  if (deletingView.superview) {
+    // Detach RN content immediately so it doesn't visually linger during native row collapse.
+    [deletingView removeFromSuperview];
+  }
+
   [_itemViews removeObjectAtIndex:row];
   if (row < _itemHeights.count) {
     [_itemHeights removeObjectAtIndex:row];
@@ -321,7 +328,7 @@ static NSArray<EditableListSwipeAction *> *EditableListSwipeActionArrayFromVecto
   @try {
     [_tableView beginUpdates];
     [_tableView deleteRowsAtIndexPaths:@[ indexPath ]
-                      withRowAnimation:UITableViewRowAnimationLeft];
+                      withRowAnimation:UITableViewRowAnimationAutomatic];
     [_tableView endUpdates];
   } @catch (NSException *exception) {
     [CATransaction commit];
@@ -547,9 +554,10 @@ static NSArray<EditableListSwipeAction *> *EditableListSwipeActionArrayFromVecto
   [itemView layoutIfNeeded];
 
   cell.selectionStyle = UITableViewCellSelectionStyleNone;
-  cell.backgroundColor = UIColor.clearColor;
-  cell.contentView.backgroundColor = UIColor.clearColor;
-  cell.contentView.clipsToBounds = YES;
+  cell.backgroundColor = UIColor.systemBackgroundColor;
+  cell.contentView.backgroundColor = UIColor.systemBackgroundColor;
+  cell.clipsToBounds = NO;
+  cell.contentView.clipsToBounds = NO;
   return cell;
 }
 
@@ -616,7 +624,9 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
   }
 
   NSArray<EditableListSwipeAction *> *orderedActions = actions;
-  BOOL allowsFullSwipeDelete = NO;
+  // Allow native full-swipe for the first action on each side.
+  // Delete keeps its custom handling below.
+  BOOL allowsFullSwipeFirstAction = actions.count > 0;
   if (!isLeading) {
     NSInteger deleteActionIndex = NSNotFound;
     for (NSInteger index = 0; index < actions.count; index++) {
@@ -626,7 +636,7 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
       }
     }
     if (deleteActionIndex != NSNotFound) {
-      allowsFullSwipeDelete = YES;
+      allowsFullSwipeFirstAction = YES;
       if (deleteActionIndex != 0) {
         NSMutableArray<EditableListSwipeAction *> *mutableActions = [actions mutableCopy];
         EditableListSwipeAction *deleteAction = mutableActions[(NSUInteger)deleteActionIndex];
@@ -667,30 +677,43 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
           if (row >= 0 && row < _itemViews.count) {
             pendingDeleteView = _itemViews[row];
           }
-          [self markPendingNativeDeleteForView:pendingDeleteView];
-          BOOL didAnimateDelete = NO;
-          if (pendingDeleteView) {
-            NSUInteger pendingRow = [_itemViews indexOfObjectIdenticalTo:pendingDeleteView];
-            if (pendingRow != NSNotFound) {
-              didAnimateDelete = [self animateNativeDeleteForRow:(NSInteger)pendingRow
-                                                       completion:^{
-                [self emitSwipeActionWithKey:action.key
-                                    rowIndex:row
-                                   itemIndex:itemIndex
-                                        side:side];
-              }];
-            }
-          }
-          if (didAnimateDelete) {
-            // Keep swipe state active until native delete animation removes the row.
-            completionHandler(NO);
-          } else {
+          if (!pendingDeleteView) {
             completionHandler(YES);
             [self emitSwipeActionWithKey:action.key
                                 rowIndex:row
                                itemIndex:itemIndex
                                     side:side];
+            return;
           }
+          [self markPendingNativeDeleteForView:pendingDeleteView];
+          completionHandler(YES);
+          // Let UIKit finish the full-width swipe action visual before row removal.
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
+                         dispatch_get_main_queue(), ^{
+            NSUInteger pendingRow = [_itemViews indexOfObjectIdenticalTo:pendingDeleteView];
+            if (pendingRow == NSNotFound) {
+              [self clearPendingNativeDelete];
+              [self emitSwipeActionWithKey:action.key
+                                  rowIndex:row
+                                 itemIndex:itemIndex
+                                      side:side];
+              return;
+            }
+            BOOL didAnimateDelete = [self animateNativeDeleteForRow:(NSInteger)pendingRow
+                                                          completion:^{
+              [self emitSwipeActionWithKey:action.key
+                                  rowIndex:row
+                                 itemIndex:itemIndex
+                                      side:side];
+            }];
+            if (!didAnimateDelete) {
+              [self clearPendingNativeDelete];
+              [self emitSwipeActionWithKey:action.key
+                                  rowIndex:row
+                                 itemIndex:itemIndex
+                                      side:side];
+            }
+          });
           return;
         }
         [self emitSwipeActionWithKey:action.key
@@ -725,7 +748,7 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 
   UISwipeActionsConfiguration *configuration =
       [UISwipeActionsConfiguration configurationWithActions:contextualActions];
-  configuration.performsFirstActionWithFullSwipe = allowsFullSwipeDelete;
+  configuration.performsFirstActionWithFullSwipe = allowsFullSwipeFirstAction;
   return configuration;
 }
 
