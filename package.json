@@ -1,7 +1,7 @@
 {
   "name": "react-native-fluxlist",
   "version": "0.1.0",
-  "description": "A high-performance native list for React Native with selection mode, batch actions, and swipe quick actions, backed by UITableView and RecyclerView.",
+  "description": "A simple native-backed list for React Native with optional virtualization.",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
   "exports": {
