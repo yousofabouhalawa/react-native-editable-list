@@ -1,4 +1,16 @@
 {
-  "name": "FluxListExample",
-  "displayName": "FluxListExample"
+  "expo": {
+    "name": "FluxListExample",
+    "slug": "fluxlist-example",
+    "scheme": "fluxlist",
+    "plugins": [
+      "expo-router"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.fluxlist.example"
+    },
+    "android": {
+      "package": "com.fluxlist.example"
+    }
+  }
 }

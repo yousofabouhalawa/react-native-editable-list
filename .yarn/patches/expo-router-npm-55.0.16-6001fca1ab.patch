@@ -1,0 +1,22 @@
+diff --git a/build/native-tabs/NativeTabsView.js b/build/native-tabs/NativeTabsView.js
+index 14822aedc088331dcdc146816c859c2dde724945..9f9b16cd186a0968a5ca862b8126f78671b54679 100644
+--- a/build/native-tabs/NativeTabsView.js
++++ b/build/native-tabs/NativeTabsView.js
+@@ -111,6 +111,8 @@ function Screen(props) {
+     // We need to await the icon, as VectorIcon will load asynchronously
+     const icon = (0, icon_1.useAwaitedScreensIcon)(options.icon);
+     const selectedIcon = (0, icon_1.useAwaitedScreensIcon)(options.selectedIcon);
++    const screenIcon = (0, icon_1.convertOptionsIconToRNScreensPropsIcon)(icon, standardAppearance?.stacked?.normal?.tabBarItemIconColor);
++    const selectedScreenIcon = (0, icon_1.convertOptionsIconToRNScreensPropsIcon)(selectedIcon, standardAppearance?.stacked?.selected?.tabBarItemIconColor);
+     const { colors } = (0, native_1.useTheme)();
+     const content = (<react_native_1.View 
+     // https://github.com/software-mansion/react-native-screens/issues/2662#issuecomment-2757735088
+@@ -136,7 +138,7 @@ function Screen(props) {
+             return content;
+         }
+     }, [content, options.disableAutomaticContentInsets]);
+-    return (<react_native_screens_1.Tabs.Screen {...options} overrideScrollViewContentInsetAdjustmentBehavior={!options.disableAutomaticContentInsets} tabBarItemBadgeBackgroundColor={standardAppearance.stacked?.normal?.tabBarItemBadgeBackgroundColor} tabBarItemBadgeTextColor={badgeTextColor} standardAppearance={standardAppearance} scrollEdgeAppearance={scrollEdgeAppearance} icon={(0, icon_1.convertOptionsIconToRNScreensPropsIcon)(icon, standardAppearance?.stacked?.normal?.tabBarItemIconColor)} selectedIcon={(0, icon_1.convertOptionsIconToIOSPropsIcon)(selectedIcon, standardAppearance?.stacked?.selected?.tabBarItemIconColor)} title={title} freezeContents={false} systemItem={options.role} {...options.nativeProps} tabKey={routeKey} isFocused={isFocused}>
++    return (<react_native_screens_1.Tabs.Screen {...options} overrideScrollViewContentInsetAdjustmentBehavior={!options.disableAutomaticContentInsets} tabBarItemBadgeBackgroundColor={standardAppearance.stacked?.normal?.tabBarItemBadgeBackgroundColor} tabBarItemBadgeTextColor={badgeTextColor} standardAppearance={standardAppearance} scrollEdgeAppearance={scrollEdgeAppearance} icon={screenIcon} selectedIcon={selectedScreenIcon?.ios} ios={{ icon: screenIcon?.ios, selectedIcon: selectedScreenIcon?.ios, standardAppearance, scrollEdgeAppearance, systemItem: options.role, overrideScrollViewContentInsetAdjustmentBehavior: !options.disableAutomaticContentInsets }} android={{ icon: screenIcon?.android, selectedIcon: selectedScreenIcon?.android }} title={title} freezeContents={false} systemItem={options.role} {...options.nativeProps} screenKey={routeKey} tabKey={routeKey} isFocused={isFocused}>
+       {wrappedContent}
+     </react_native_screens_1.Tabs.Screen>);
+ }
